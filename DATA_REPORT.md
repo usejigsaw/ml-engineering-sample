@@ -181,7 +181,7 @@ The reversal propagates: EOS indexing fails (the functional test catches incorre
 | Cross-Config Doc Journey         | grok-4.3        | 0.66  | 48    | 7.1 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/cross-config-doc-journey/grok-4.3__score-0.66.md)           |
 | Checkpoint Progression Forensics | kimi-k2.5       | 0.802 | 23    | 7.8 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/checkpoint-progression-forensics/kimi-k2.5__score-0.802.md) |
 | Packed-Sequence Pipeline Repair  | grok-4.3        | 0.00  | 47    | 8.0 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/grok-4.3__score-0.00.md)                     |
-| Packed-Sequence Pipeline Repair  | gpt-5.5         | 1.00  | --    | 16.3 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/gpt-5.5__score-1.00.md)                      |
+| Packed-Sequence Pipeline Repair  | gpt-5.5         | 1.00  | 72    | 16.3 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/gpt-5.5__score-1.00.md)                      |
 | Packed-Sequence Pipeline Repair  | grok-4.3        | 0.65  | 61    | 8.4 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/grok-4.3__score-0.65.md)                     |
 
 
