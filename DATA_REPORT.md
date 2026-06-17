@@ -105,44 +105,71 @@ Only gpt-5.4 achieves a perfect score (1 of 3 rollouts). The task requires simul
 
 # Trace Walkthrough
 
-## grok-4.3 on Checkpoint Progression Forensics (score: 0.593)
+## grok-4.3 on Packed-Sequence Pipeline Repair (score: 0.00)
 
-grok-4.3 scores 0.593 in 31 tool calls over 5.4 minutes. Passes C1 (r32 eval_loss trajectory), C2 (multi-run comparison), and C3 (identifies second overfitting case). Fails C4 (downstream benchmark correlation) and C5 (concrete failure-mode evidence). No penalties applied.
+grok-4.3 scores 0.00 in 47 tool calls over 8 minutes on a task requiring repair of three interacting bugs in a production SFT sequence-packing pipeline. The task is graded by functional Python tests that execute the repaired code. Despite extensive analysis and 5 code edits, Grok fails all three criteria because it reverses a correct fix based on an incorrect inference about the data layout.
 
-### Phase 1: Environment Discovery (steps 1-6)
+### The Task
 
-The agent explores the workspace structure: `runs/` directory with 33 adapter configurations, `evaluations/` with benchmark results, and top-level parquet files (`training_curves_comparison.parquet`, `eval_results_comparison.parquet`, `qwen3_cross_run_comparison.parquet`). This initial scan correctly identifies all data sources.
+The agent must fix three bugs in a NeMo-style packed-SFT pipeline:
+1. **EOS indexing** under context parallelism (CP=2), where sequences are prepadded with extra EOS tokens
+2. **Loss-boundary off-by-one** in `answer_start_idx`-based masking
+3. **Mask/label alignment shift** for pre-computed loss masks
 
-### Phase 2: Training Dynamics Analysis (steps 7-17)
+The prompt states: "we also run with CP=2 which prepadds sequences with extra EOS tokens. loss is abnormally high (~3.8 vs ~2.1) when packing is enabled with context parallelism, which suggests the unpadded sequence length calculation may be wrong for prepadded sequences."
 
-The agent loads `training_curves_comparison.parquet` and reconstructs step-keyed eval_loss trajectories for all runs. It identifies:
+### Phase 1: Diagnosis (steps 1-32)
 
-- `lora_r32_all_alpaca`: eval_loss rising from 1.27 to 1.44 after step 250 (correct)
-- `lora_r16_mlp_alpaca`: catastrophic overfitting, eval_loss reaching 1.97 (correct)
-- `full_ft_code`: gradual overfitting after step 600, eval_loss rising from 0.89 to 1.10 (correct, satisfies C3)
-- Stable runs (`ia3`, `adalora`, `lora_r4`) showing monotonic improvement
+The agent reads the full pipeline: `sequence_packing_utils.py`, `core.py`, `gpt_sft_dataset.py`, and `prepare_packed_ft_dataset.py`. It correctly identifies:
+- The collate function slices `input_ids[start:end-1]` and `labels[start+1:end]`, producing a 1-position shift between inputs and labels
+- The `_build_loss_mask` function slices `loss_mask[start:end-1]`, aligned with inputs rather than labels
+- The EOS indexing uses `eos_idx[0][0] + 1` (first EOS), but a code comment states "The second eos_id index marks the length of the original unpadded sequence"
 
-This analysis correctly reconstructs the full sweep. The agent reads individual `trainer_state.json` files to cross-validate the parquet data, confirming step-keyed values match.
+Grok's reasoning at this point is correct: the loss mask needs shifting, and the EOS indexing should use the second index for prepadded sequences.
 
-### Phase 3: The Critical Gap (step 10 and step 18)
+### Phase 2: Initial Fix (step 43) -- Correct
 
-At step 10, the agent reads `eval_results_comparison.parquet` and discovers it contains downstream benchmark scores (arc_easy, hellaswag, piqa) for every adapter run. At step 18, it pivots the data into a per-run benchmark comparison table, revealing that overfitting adapters (`lora_r32_all`, `lora_r16_mlp`) score lower on downstream benchmarks than stable ones.
+The agent writes a correct EOS fix:
 
-**The agent has the data. It sees the connection. It does not use it.**
+```python
+if len(eos_idx[0]) > 1:
+    # prepadded: second EOS marks end of real content
+    seqlen_unpadded = eos_idx[0][1] + 1
+else:
+    seqlen_unpadded = eos_idx[0][0] + 1
+```
 
-### Phase 4: Report Generation (steps 26-27)
+This correctly handles the prepadded case: when CP>1 adds an extra EOS before the content, the first EOS is padding and the second marks the real boundary.
 
-The agent's reasoning at step 26: "Now I have a comprehensive understanding of the training data. Let me compile my findings into the REPORT.md file."
+### Phase 3: The Reversal (step 44) -- Incorrect
 
-The resulting report is technically detailed: 9,000+ characters covering eval_loss trajectories, overfitting mechanisms, adapter susceptibility rankings, and early-warning metrics. It correctly identifies which adapter types overfit and why. But it contains zero benchmark scores, zero per-sample predictions, and zero correlation between overfitting and downstream task performance.
+One step later, the agent replaces its correct fix with:
 
-### Root Cause: Analytical Prioritization Failure
+```python
+# The first eos_id index marks the length of the original unpadded sequence.
+# When prepadded for cp_size > 1, extra EOS tokens are appended after the original EOS,
+# so we always use the first EOS to determine the real content length.
+seqlen_unpadded = eos_idx[0][0] + 1 if eos_idx[0].any() else len(current_seq)
+```
 
-The agent treats training dynamics as the complete answer. It conflates "identifying overfitting via eval_loss divergence" with "demonstrating that overfitting actually degrades downstream performance." In ML research, these are distinct claims requiring distinct evidence. A model's eval_loss can rise without proportional benchmark degradation (if the overfitting is on low-frequency patterns irrelevant to the benchmarks), or benchmark scores can drop without eval_loss divergence (distribution shift). The rubric requires showing the actual correlation; the agent assumes it.
+The reasoning is stated explicitly in the comment: Grok now believes "extra EOS tokens are appended AFTER the original EOS." Under this assumption, the sequence layout would be `[content..., EOS_original, EOS_padded, EOS_padded]`, and the first EOS is indeed the real boundary. But the task prompt says "prepadds" (prepends), and the actual layout is `[EOS_padded, content..., EOS_original]`.
 
-This is a genuine analytical gap, not a data-access issue. The agent examined the benchmark data (step 10, step 18), produced a pivot table showing per-adapter benchmark performance, then excluded this from the final report. The report's reasoning treats eval_loss trajectories as sufficient evidence for downstream impact without verifying the claim against the available benchmark data.
+### Root Cause: Data-Flow Misinterpretation
 
-**Training signal:** This failure pattern is trainable. The model executes the "hard" part (reconstructing trajectories from raw checkpoints, identifying overfitting patterns across 33 runs) but stops one analytical step short of the complete picture. A reward signal penalizing incomplete causal chains (identifying a pattern without connecting it to its downstream consequence) targets the right capability gap.
+Grok reads the padding utility code:
+```python
+val = val + [pad_id] * num_pad
+```
+
+This line appends pad tokens. Grok concludes: "pad_id is eos_id, and the code appends, so EOS tokens come AFTER the original content." Based on this local observation, it reverts to using the first EOS index.
+
+The error: Grok conflates a local code operation (appending padding for length alignment) with the global sequence layout produced by the full pipeline. The prepadding that matters for CP=2 happens at a different stage. The code comment ("second eos_id index marks the length") reflects the actual runtime layout. A skilled ML engineer would trust the design-intent comment and verify by tracing data through the full pipeline, rather than inferring global tensor layout from one line in a utility function.
+
+### Consequence
+
+The reversal propagates: EOS indexing fails (the functional test catches incorrect sequence-length boundaries). Grok also only edits `core.py`, leaving the twin implementation in `gpt_sft_dataset.py` unfixed. The loss-mask edits, applied at the wrong abstraction level, produce masks misaligned with both the boundary criterion and the label shift. Score: 0.00 across all three functional tests.
+
+**Training signal:** This failure reveals a specific capability gap: tracing data transformations across multiple pipeline stages to determine the actual tensor layout at a given point. The model defaults to local code interpretation rather than end-to-end data-flow analysis. The self-reversal from correct to incorrect, driven by a surface-level code reading, is the signature pattern. A reward signal that requires correct reasoning about multi-stage data transformations, not just identifying that a fix is needed, targets this gap directly.
 
 # Trace Links
 
@@ -153,7 +180,7 @@ This is a genuine analytical gap, not a data-access issue. The agent examined th
 | Cross-Config Doc Journey         | gpt-5.5         | 0.94  | 69    | 76.9 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/cross-config-doc-journey/gpt-5.5__score-0.94.md)            |
 | Cross-Config Doc Journey         | grok-4.3        | 0.66  | 48    | 7.1 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/cross-config-doc-journey/grok-4.3__score-0.66.md)           |
 | Checkpoint Progression Forensics | kimi-k2.5       | 0.802 | 23    | 7.8 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/checkpoint-progression-forensics/kimi-k2.5__score-0.802.md) |
-| Checkpoint Progression Forensics | grok-4.3        | 0.593 | 31    | 5.4 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/checkpoint-progression-forensics/grok-4.3__score-0.593.md)  |
+| Packed-Sequence Pipeline Repair  | grok-4.3        | 0.00  | 47    | 8.0 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/grok-4.3__score-0.00.md)                     |
 | Packed-Sequence Pipeline Repair  | gpt-5.5         | 1.00  | --    | 16.3 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/gpt-5.5__score-1.00.md)                      |
 | Packed-Sequence Pipeline Repair  | grok-4.3        | 0.65  | 61    | 8.4 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/grok-4.3__score-0.65.md)                     |
 
