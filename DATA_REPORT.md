@@ -131,7 +131,13 @@ The error: Grok conflates a local code operation (appending padding for length a
 
 ### Consequence
 
-The reversal propagates: EOS indexing fails (the functional test catches incorrect sequence-length boundaries). Grok also only edits `core.py`, leaving the twin implementation in `gpt_sft_dataset.py` unfixed. The loss-mask edits, applied at the wrong abstraction level, produce masks misaligned with both the boundary criterion and the label shift. Score: 0.00 across all three functional tests.
+Grok's submitted code leaves all three bugs in place:
+
+1. **EOS reversal undoes its own correct fix.** The collate function still uses `eos_idx[0][0]` (the first EOS) instead of `eos_idx[0][1]` (the second). For a prepadded sequence `[EOS_pad, content..., EOS_natural]`, this computes `seqlen_unpadded = 0 + 1 = 1` regardless of actual content length. The resulting `cu_seqlens_unpadded` is passed as `cu_seqlens_q`/`cu_seqlens_kv` to the attention kernel via `PackedSeqParams`, which then treats all but the first token as padding -- the direct cause of the ~3.8 vs ~2.1 loss spike under CP. Grok also only edits `core.py`, leaving the identical bug in `gpt_sft_dataset.py` unfixed.
+
+2. **The `sequence_packing_utils.py` root causes are never addressed.** The missing loss-mask roll (which should shift the pre-computed mask by 1 to align with next-token labels) and the wrong `answer_start_idx` boundary (which starts loss one position too late and spuriously excludes tokens matching `pad_id`) remain intact. Grok instead edits `_build_loss_mask` in the collate function and adds loss-mask padding in `prepare_packed_ft_dataset.py`, neither of which fixes the upstream misalignment.
+
+Score: 0.00 across all three functional tests.
 
 # Trace Links
 
