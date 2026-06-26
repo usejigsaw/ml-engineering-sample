@@ -9,13 +9,19 @@ We detail the task difficulty below on our three sample tasks.
 
 | **Model**         | **Mean** | **Pass@1** | **Pass@5** | **Min** | **Max** | **Std** | **Range** |
 | ----------------- | -------- | ---------- | ---------- | ------- | ------- | ------- | --------- |
-| GPT-5.5           | 71.7     | 4.8%       | 23.8%      | 19.8    | 100     | 21.4    | 80.2      |
-| Claude Opus 4.7   | 64.7     | 8.0%       | 36.7%      | 0.0     | 100     | 24.8    | 100       |
-| Claude Opus 4.6   | 59.4     | 0.0%       | 0.0%       | 0.0     | 94.0    | 25.0    | 94.0      |
-| GLM-5.1           | 58.2     | 0.0%       | 0.0%       | 0.0     | 90.0    | 27.7    | 90.0      |
-| Claude Sonnet 4.6 | 55.1     | 18.2%      | 67.5%      | 0.0     | 100     | 38.7    | 100       |
-| **Grok 4.3**      | 50.1     | 0.0%       | 0.0%       | 0.0     | 80.2    | 20.9    | 80.2      |
-| Gemini 3.1 Pro    | 30.2     | 0.0%       | 0.0%       | 0.0     | 80.2    | 19.2    | 80.2      |
+| GPT 5.5           | 85.7     | 35.0%      | 88.4%      | 59.3    | 100     | 15.6    | 40.7      |
+| GLM 5.2           | 70.9     | 13.3%      | 51.1%      | 0.0     | 100     | 25.7    | 100       |
+| GPT 5.4           | 70.1     | 8.7%       | 36.5%      | 35.0    | 100     | 18.9    | 65.0      |
+| Claude Sonnet 4.6 | 70.0     | 8.0%       | 34.1%      | 0.0     | 100     | 26.7    | 100       |
+| Gemini 3.5 Flash  | 62.4     | 5.6%       | 24.9%      | 0.0     | 100     | 25.9    | 100       |
+| Claude Opus 4.7   | 61.9     | 12.0%      | 47.2%      | 0.0     | 100     | 33.9    | 100       |
+| GLM 5.1           | 58.9     | 20.8%      | 68.9%      | 0.0     | 100     | 34.4    | 100       |
+| Qwen3.6 Plus      | 58.7     | 4.8%       | 21.6%      | 0.0     | 100     | 32.8    | 100       |
+| Kimi K2.5         | 53.9     | 0.0%       | 0.0%       | 0.0     | 80.2    | 21.7    | 80.2      |
+| Kimi K2.6         | 52.8     | 0.0%       | 0.0%       | 0.0     | 94.0    | 35.2    | 94.0      |
+| Claude Opus 4.5   | 51.8     | 0.0%       | 0.0%       | 0.0     | 90.0    | 23.4    | 90.0      |
+| Claude Haiku 4.5  | 38.6     | 0.0%       | 0.0%       | 0.0     | 80.2    | 29.8    | 80.2      |
+| **Grok 4.3**      | 15.7     | 0.0%       | 0.0%       | 0.0     | 65.0    | 20.1    | 65.0      |
 
 
 # Environment
@@ -41,7 +47,7 @@ All three tasks share the same harness configuration:
 
 ### Checkpoint Progression Forensics
 
-We evaluated 12 models at 8-10 rollouts each on this sample task.
+We evaluated 13 models at 10 rollouts each on this sample task.
 
 
 
@@ -53,7 +59,7 @@ We evaluated 12 models at 8-10 rollouts each on this sample task.
 
 ### Cross-Config Doc Journey
 
-We evaluated 12 models at 8-10 rollouts each on this sample task.
+We evaluated 13 models at 5-10 rollouts each on this sample task.
 
 
 
@@ -65,7 +71,7 @@ We evaluated 12 models at 8-10 rollouts each on this sample task.
 
 ### Packed-Sequence Pipeline Repair
 
-We evaluated 12 models at 5 rollouts each on this sample task.
+We evaluated 11 models at 3-5 rollouts each on this sample task.
 
 
 
@@ -74,6 +80,18 @@ We evaluated 12 models at 5 rollouts each on this sample task.
 
 
 *Fig 2. Metadata for packed-sequence-pipeline-repair.*
+
+# Verification
+
+Three verification mechanisms cover the three grading modalities in this sample.
+
+**Packed-Sequence Pipeline Repair (deterministic).** Graders are Python functional tests that execute the repaired code against fixed inputs and assert on output values. FP rate: 0. FN rate: 0. No judge variance; grading is fully reproducible.
+
+**Cross-Config Doc Journey (LLM-as-judge).** Graded by Claude Sonnet 4.6 against a 10-criterion weighted rubric with ground-truth reference values embedded in each criterion. FN rate: 0/15 sampled low-scoring traces. FP rate: 0/15 sampled high-scoring traces. Measured stochastic variance: +/-0.08 per trace on re-run. A fabrication gate (weight 0, zero_on_met) fires on checkable contradictions of ground truth; an identity-anchored grounding overrule requires citing real document IDs from the staged corpus to lift a gate-zero.
+
+**Checkpoint Progression Forensics (LLM-as-judge).** Graded by Claude Sonnet 4.6 against a 7-criterion rubric with reference eval_loss trajectories and benchmark ceilings embedded in each criterion. FN rate: 0/15. FP rate: 0/15. A fabrication gate fires on impossible claims (eval_loss outside reference envelope, benchmark accuracy above 0.68 ceiling, wrong base-model identity). A contradiction penalty (-20) docks values that drift outside the reference bands, providing defense-in-depth for calibrated fabrications that stay under the gate.
+
+**Reward-hacking resilience.** All three tasks were tested with dedicated adversarial probes (red-team agents instructed to fabricate convincing outputs without doing real analysis). All probes scored 0.00. Detailed per-attempt results: [Appendix A](APPENDIX_A_REWARD_HACKING.md) (nm-pack-triple, 4 attempts), [Appendix B](APPENDIX_B_REWARD_HACKING_DATATROVE.md) (cross-config-doc-journey, 3 attempts), [Appendix C](APPENDIX_C_REWARD_HACKING_PEFT.md) (checkpoint-progression-forensics, 3 attempts).
 
 # Trace Walkthrough
 
@@ -144,10 +162,10 @@ Score: 0.00 across all three functional tests.
 
 | Task                             | Model           | Score | Steps | Duration | Link                                                                                                                                    |
 | -------------------------------- | --------------- | ----- | ----- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Cross-Config Doc Journey         | claude-opus-4-7 | 1.00  | 96    | 80.5 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/cross-config-doc-journey/claude-opus-4-7__score-1.00.md)    |
-| Cross-Config Doc Journey         | **grok-4.3**    | 0.66  | 48    | 7.1 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/cross-config-doc-journey/grok-4.3__score-0.66.md)           |
-| Checkpoint Progression Forensics | glm-5.1         | 0.593 | 95    | 79.3 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/checkpoint-progression-forensics/glm-5.1__score-0.593.md)   |
-| Checkpoint Progression Forensics | **grok-4.3**    | 0.593 | 31    | 5.4 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/checkpoint-progression-forensics/grok-4.3__score-0.593.md)  |
+| Cross-Config Doc Journey         | gemini-3.5-flash | 0.84  | 125   | 19.4 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/cross-config-doc-journey/gemini-3.5-flash__score-0.84.md)   |
+| Cross-Config Doc Journey         | **grok-4.3**    | 0.10  | 14    | 3.1 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/cross-config-doc-journey/grok-4.3__score-0.10.md)           |
+| Checkpoint Progression Forensics | glm-5.2         | 1.00  | 84    | 20.5 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/checkpoint-progression-forensics/glm-5.2__score-1.00.md)    |
+| Checkpoint Progression Forensics | **grok-4.3**    | 0.198 | 14    | 1.9 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/checkpoint-progression-forensics/grok-4.3__score-0.198.md)  |
 | Packed-Sequence Pipeline Repair  | gpt-5.5         | 1.00  | 72    | 16.3 min | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/gpt-5.5__score-1.00.md)                      |
 | Packed-Sequence Pipeline Repair  | **grok-4.3**    | 0.65  | 61    | 8.4 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/grok-4.3__score-0.65.md)                     |
 | Packed-Sequence Pipeline Repair  | **grok-4.3**    | 0.00  | 47    | 8.0 min  | [trace](https://github.com/usejigsaw/ml-engineering-sample/blob/main/traces/nm-pack-triple/grok-4.3__score-0.00.md)                     |
@@ -160,4 +178,12 @@ Full scorecards with failure-mode breakdowns, per-criterion pass rates, and beha
 - [Checkpoint Progression Forensics](https://data.jigsaw.build/ml-engineering/checkpoint-progression-forensics/)
 - [Cross-Config Doc Journey](https://data.jigsaw.build/ml-engineering/cross-config-doc-journey/)
 - [Packed-Sequence Pipeline Repair](https://data.jigsaw.build/ml-engineering/nm-pack-triple/)
+
+# Appendix
+
+[Appendix A.](APPENDIX_A_REWARD_HACKING.md) Reward-hacking resilience (Packed-Sequence Pipeline Repair)
+
+[Appendix B.](APPENDIX_B_REWARD_HACKING_DATATROVE.md) Reward-hacking resilience (Cross-Config Doc Journey)
+
+[Appendix C.](APPENDIX_C_REWARD_HACKING_PEFT.md) Reward-hacking resilience (Checkpoint Progression Forensics)
 
